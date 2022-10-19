@@ -38,6 +38,8 @@ public:
   // Connect to another Modbus server
   void connect(IPAddress host, uint16_t port = 502);
 
+  bool isConnected();
+  
   // manually disconnect from modbus server. Connection will also auto close after idle time
   void disconnect(bool force = false);
 

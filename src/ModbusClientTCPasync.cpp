@@ -170,6 +170,10 @@ void ModbusClientTCPasync::onConnected() {
   // from now on onPoll will be called every 500 msec
 }
 
+bool ModbusClientTCPasync::isConnected() {
+  return MTA_state == CONNECTED;
+}
+
 void ModbusClientTCPasync::onDisconnected() {
   LOG_D("disconnected\n");
   LOCK_GUARD(lock1, sLock);
@@ -187,9 +191,20 @@ void ModbusClientTCPasync::onDisconnected() {
   }
   while (!rxQueue.empty()) {
     RequestEntry *r = rxQueue.begin()->second;
-    if (onError) {
-      onError(IP_CONNECTION_FAILED, r->token);
+    LOG_E("deleted job\n");
+    if (r->isSyncRequest) {
+      LOCK_GUARD(sL ,syncRespM);
+      
+      ModbusMessage response;
+      response.setError(0, 0, IP_CONNECTION_FAILED);
+
+      syncResponse[r->token] = response;
+    } else {
+      if (onError) {
+        onError(IP_CONNECTION_FAILED, r->token);
+      }
     }
+
     delete r;
     rxQueue.erase(rxQueue.begin());
   }
@@ -199,6 +214,8 @@ void ModbusClientTCPasync::onDisconnected() {
 void ModbusClientTCPasync::onACError(AsyncClient* c, int8_t error) {
   // onDisconnect will alse be called, so nothing to do here
   LOG_W("TCP error: %s\n", c->errorToString(error));
+  disconnect();
+
 }
 
 /*
