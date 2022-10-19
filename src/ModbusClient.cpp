@@ -83,7 +83,7 @@ ModbusMessage ModbusClient::waitSync(uint8_t serverID, uint8_t functionCode, uin
   response.setError(serverID, functionCode, TIMEOUT);
 
   // Loop 60 seconds, if unlucky
-  while (millis() - lostPatience < 60000) {
+  while (millis() - lostPatience < 600) {
     {
       LOCK_GUARD(lg, syncRespM);
       // Look for the token
