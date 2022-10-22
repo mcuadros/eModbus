@@ -39,9 +39,10 @@ public:
   void connect(IPAddress host, uint16_t port = 502);
 
   bool isConnected();
-  
+ virtual void disconnect(bool force = false);
+
   // manually disconnect from modbus server. Connection will also auto close after idle time
-  void disconnect(bool force = false);
+  //void disconnect(bool force = false);
 
   // Set timeout value
   void setTimeout(uint32_t timeout);

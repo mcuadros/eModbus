@@ -39,7 +39,7 @@ public:
   void resetCounts();                    // Set both message and error counts to zero
   inline Error addRequest(ModbusMessage m, uint32_t token) { return addRequestM(m, token); }
   inline ModbusMessage syncRequest(ModbusMessage m, uint32_t token) { return syncRequestM(m, token); }
-
+ virtual void disconnect(bool force = false) = 0;
   // Template function to generate syncRequest functions as long as there is a 
   // matching ModbusMessage::setMessage() call
   template <typename... Args>

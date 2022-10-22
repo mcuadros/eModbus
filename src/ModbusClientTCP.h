@@ -34,7 +34,7 @@ public:
 
   // begin: start worker task
   void begin(int coreID = -1);
-
+virtual void disconnect(bool force = false) {};
   // Set default timeout value (and interval)
   void setTimeout(uint32_t timeout = DEFAULTTIMEOUT, uint32_t interval = TARGETHOSTINTERVAL);
 
@@ -155,7 +155,6 @@ protected:
 
   // addToQueue: send freshly created request to queue
   bool addToQueue(uint32_t token, ModbusMessage request, TargetHost target, bool syncReq = false);
-
   // handleConnection: worker task method
   static void handleConnection(ModbusClientTCP *instance);
 #if IS_LINUX

@@ -81,6 +81,7 @@ ModbusMessage ModbusClient::waitSync(uint8_t serverID, uint8_t functionCode, uin
  
   // Default response is TIMEOUT
   response.setError(serverID, functionCode, TIMEOUT);
+  int bCatch = false;
 
   // Loop 60 seconds, if unlucky
   while (millis() - lostPatience < 600) {
@@ -93,11 +94,19 @@ ModbusMessage ModbusClient::waitSync(uint8_t serverID, uint8_t functionCode, uin
         // Yes. get the response, delete it from the map and return
         response = sR->second;
         syncResponse.erase(sR);
+        bCatch = true;
         break;
       }
     }
     // Give the watchdog time to act
     delay(10);
+  }
+
+
+  if (!bCatch) {
+    LOG_E("disconnect, cleanup syncRequest:%d\n", syncResponse.size());
+    disconnect(true);
+    LOG_I("remaining syncRequest:%d\n", syncResponse.size());
   }
   return response;
 }

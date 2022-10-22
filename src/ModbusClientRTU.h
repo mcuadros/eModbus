@@ -35,7 +35,7 @@ public:
 
   // end: stop the worker
   void end();
-
+  virtual void disconnect(bool force = false) {};
   // Set default timeout value for interface
   void setTimeout(uint32_t TOV);
 

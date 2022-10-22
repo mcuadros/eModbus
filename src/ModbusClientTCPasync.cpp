@@ -77,7 +77,7 @@ void ModbusClientTCPasync::connect(IPAddress host, uint16_t port) {
 }
 
 // manually disconnect from modbus server. Connection will also auto close after idle time
-void ModbusClientTCPasync::disconnect(bool force) {
+ void ModbusClientTCPasync::disconnect(bool force) {
   LOG_D("disconnecting\n");
   MTA_client.close(force);
 }
@@ -175,13 +175,14 @@ bool ModbusClientTCPasync::isConnected() {
 }
 
 void ModbusClientTCPasync::onDisconnected() {
-  LOG_D("disconnected\n");
+  LOG_I("disconnected\n");
   LOCK_GUARD(lock1, sLock);
   MTA_state = DISCONNECTED;
 
   // empty queue on disconnect, calling errorcode on every waiting request
   LOCK_GUARD(lock2, qLock);
   while (!txQueue.empty()) {
+    LOG_E("deleted job tx\n");
     RequestEntry* r = txQueue.front();
     if (onError) {
       onError(IP_CONNECTION_FAILED, r->token);
@@ -191,7 +192,7 @@ void ModbusClientTCPasync::onDisconnected() {
   }
   while (!rxQueue.empty()) {
     RequestEntry *r = rxQueue.begin()->second;
-    LOG_E("deleted job\n");
+    LOG_E("deleted job rx\n");
     if (r->isSyncRequest) {
       LOCK_GUARD(sL ,syncRespM);
       
