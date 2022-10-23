@@ -105,6 +105,13 @@ ModbusMessage ModbusClient::waitSync(uint8_t serverID, uint8_t functionCode, uin
 
   if (!bCatch) {
     LOG_E("disconnect, cleanup syncRequest:%d\n", syncResponse.size());
+    {
+      LOCK_GUARD(lg, syncRespM);
+      while (!syncResponse.empty()) {
+        syncResponse.erase(syncResponse.begin());
+      }
+    }
+
     disconnect(true);
     LOG_I("remaining syncRequest:%d\n", syncResponse.size());
   }
