@@ -60,8 +60,7 @@ void ModbusClientTCPasync::connect() {
   LOG_D("connecting\n");
   LOCK_GUARD(lock1, sLock);
   // only connect if disconnected
-  if (MTA_state == DISCONNECTED) {
-    MTA_state = CONNECTING;
+  if (state() == DISCONNECTED) {
     MTA_client.connect(MTA_host, MTA_port);
   }
 }
@@ -74,6 +73,18 @@ void ModbusClientTCPasync::connect(IPAddress host, uint16_t port) {
   MTA_host = host;
   MTA_port = port;
   connect();
+}
+
+ModbusClientTCPasync::ClientState ModbusClientTCPasync::state() {
+  switch (MTA_client.state()) {
+    case 4: 
+      return CONNECTED;
+    case 2: 
+    case 3:
+      return CONNECTING;
+    default:
+      return DISCONNECTED;
+  }
 }
 
 // manually disconnect from modbus server. Connection will also auto close after idle time
@@ -146,12 +157,12 @@ bool ModbusClientTCPasync::addToQueue(int32_t token, ModbusMessage request, bool
       re->head.len = request.size();
       // if we're already connected, try to send and push to rxQueue
       // or else push to txQueue and (re)connect
-      if (MTA_state == CONNECTED && send(re)) {
+      if (state() == CONNECTED && send(re)) {
         re->sentTime = millis();
         rxQueue[re->head.transactionID] = re;
       } else {
         txQueue.push_back(re);
-        if (MTA_state == DISCONNECTED) {
+        if (state() == DISCONNECTED) {
           connect();
         }
       }
@@ -165,19 +176,17 @@ bool ModbusClientTCPasync::addToQueue(int32_t token, ModbusMessage request, bool
 void ModbusClientTCPasync::onConnected() {
   LOG_D("connected\n");
   LOCK_GUARD(lock1, sLock);
-  MTA_state = CONNECTED;
   MTA_lastActivity = millis();
   // from now on onPoll will be called every 500 msec
 }
 
 bool ModbusClientTCPasync::isConnected() {
-  return MTA_state == CONNECTED;
+  return state() == CONNECTED;
 }
 
 void ModbusClientTCPasync::onDisconnected() {
   LOG_I("disconnected\n");
   LOCK_GUARD(lock1, sLock);
-  MTA_state = DISCONNECTED;
 
   // empty queue on disconnect, calling errorcode on every waiting request
   LOCK_GUARD(lock2, qLock);

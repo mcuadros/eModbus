@@ -146,13 +146,20 @@ protected:
   uint16_t MTA_qLimit;              // Maximum number of requests to accept in queue
   uint32_t MTA_maxInflightRequests; // Maximum number of inflight requests
   uint32_t MTA_lastActivity;        // Last time there was activity (disabled when queues are not empty)
-  enum {
+  
+
+  enum ClientState {
     DISCONNECTED,
     CONNECTING,
     CONNECTED
-  } MTA_state;                      // TCP connection state
+  };
+  
+  ClientState MTA_state;                      // TCP connection state
   IPAddress MTA_host;
   uint16_t MTA_port;
+  
+  ClientState state();
 };
+
 
 #endif
