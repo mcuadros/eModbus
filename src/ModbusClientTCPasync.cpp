@@ -389,6 +389,8 @@ void ModbusClientTCPasync::handleSendingQueue() {
   // Calling sites must assure shared resources are protected
   // by mutex.
 
+  if (!MTA_client) return;
+
   // try to send everything we have waiting
   std::list<RequestEntry*>::iterator it = txQueue.begin();
   while (it != txQueue.end()) {
