@@ -11,7 +11,7 @@ ModbusClientTCPasync::ModbusClientTCPasync(IPAddress address, uint16_t port, uin
   ModbusClient(),
   txQueue(),
   rxQueue(),
-  MTA_client(),
+  MTA_client(nullptr),
   MTA_timeout(DEFAULTTIMEOUT),
   MTA_idleTimeout(DEFAULTIDLETIME),
   MTA_qLimit(queueLimit),
@@ -21,17 +21,6 @@ ModbusClientTCPasync::ModbusClientTCPasync(IPAddress address, uint16_t port, uin
   MTA_host(address),
   MTA_port(port)
     {
-      // attach all handlers on async tcp events
-      MTA_client.onConnect([](void* i, AsyncClient* c) { (static_cast<ModbusClientTCPasync*>(i))->onConnected(); }, this);
-      MTA_client.onDisconnect([](void* i, AsyncClient* c) { (static_cast<ModbusClientTCPasync*>(i))->onDisconnected(); }, this);
-      MTA_client.onError([](void* i, AsyncClient* c, int8_t error) { (static_cast<ModbusClientTCPasync*>(i))->onACError(c, error); }, this);
-      // MTA_client.onTimeout([](void* i, AsyncClient* c, uint32_t time) { (static_cast<ModbusClientTCPasync*>(i))->onTimeout(time); }, this);
-      // MTA_client.onAck([](void* i, AsyncClient* c, size_t len, uint32_t time) { (static_cast<ModbusClientTCPasync*>(i))->onAck(len, time); }, this);
-      MTA_client.onData([](void* i, AsyncClient* c, void* data, size_t len) { (static_cast<ModbusClientTCPasync*>(i))->onPacket(static_cast<uint8_t*>(data), len); }, this);
-      MTA_client.onPoll([](void* i, AsyncClient* c) { (static_cast<ModbusClientTCPasync*>(i))->onPoll(); }, this);
-
-      // disable nagle algorithm ref Modbus spec
-      MTA_client.setNoDelay(true);
     }
 
 // Destructor: clean up queue, task etc.
@@ -51,18 +40,37 @@ ModbusClientTCPasync::~ModbusClientTCPasync() {
       it = rxQueue.erase(it);
     }
   }
+
   // force close client
-  MTA_client.close(true);
+  if (MTA_client) MTA_client->close(true);
 }
 
 // optionally manually connect to modbus server. Otherwise connection will be made upon first request
 void ModbusClientTCPasync::connect() {
   LOG_D("connecting\n");
   LOCK_GUARD(lock1, sLock);
-  // only connect if disconnected
-  if (state() == DISCONNECTED) {
-    MTA_client.connect(MTA_host, MTA_port);
+  
+  if (state() == CONNECTED) return;
+  
+  if(!MTA_client) {
+    MTA_client = new AsyncClient();
   }
+
+  MTA_client->onConnect([](void* i, AsyncClient* c) { (static_cast<ModbusClientTCPasync*>(i))->onConnected(c); }, this);
+  MTA_client->onDisconnect([](void* i, AsyncClient* c) { (static_cast<ModbusClientTCPasync*>(i))->onDisconnected(); }, this);
+  MTA_client->onError([](void* i, AsyncClient* c, int8_t error) { (static_cast<ModbusClientTCPasync*>(i))->onACError(c, error); }, this);
+  MTA_client->onPoll([](void* i, AsyncClient* c) { (static_cast<ModbusClientTCPasync*>(i))->onPoll(c); }, this);
+
+  // disable nagle algorithm ref Modbus spec
+  MTA_client->setNoDelay(true);
+
+  if(!MTA_client->connected()){
+    MTA_client->connect(MTA_host, MTA_port);
+  } else {
+    onConnected(MTA_client);
+  }
+  
+  MTA_lastActivity = millis();
 }
 
 // connect to another modbus server.
@@ -76,7 +84,9 @@ void ModbusClientTCPasync::connect(IPAddress host, uint16_t port) {
 }
 
 ModbusClientTCPasync::ClientState ModbusClientTCPasync::state() {
-  switch (MTA_client.state()) {
+  if (!MTA_client) return DISCONNECTED;
+
+  switch (MTA_client->state()) {
     case 4: 
       return CONNECTED;
     case 2: 
@@ -90,7 +100,8 @@ ModbusClientTCPasync::ClientState ModbusClientTCPasync::state() {
 // manually disconnect from modbus server. Connection will also auto close after idle time
  void ModbusClientTCPasync::disconnect(bool force) {
   LOG_D("disconnecting\n");
-  MTA_client.close(force);
+  if (!MTA_client) return;
+  MTA_client->abort();
 }
 
 // Set timeout value
@@ -173,11 +184,14 @@ bool ModbusClientTCPasync::addToQueue(int32_t token, ModbusMessage request, bool
   return false;
 }
 
-void ModbusClientTCPasync::onConnected() {
+void ModbusClientTCPasync::onConnected(AsyncClient* client) {
   LOG_D("connected\n");
   LOCK_GUARD(lock1, sLock);
   MTA_lastActivity = millis();
   // from now on onPoll will be called every 500 msec
+  
+  client->onData([](void* i, AsyncClient* c, void* data, size_t len) { (static_cast<ModbusClientTCPasync*>(i))->onPacket(static_cast<uint8_t*>(data), len); }, this);
+  client->onAck([](void* i, AsyncClient* c, size_t len, uint32_t time) { (static_cast<ModbusClientTCPasync*>(i))->onAck(len, time); }, this);
 }
 
 bool ModbusClientTCPasync::isConnected() {
@@ -218,25 +232,24 @@ void ModbusClientTCPasync::onDisconnected() {
     delete r;
     rxQueue.erase(rxQueue.begin());
   }
+
+  delete MTA_client;
+  MTA_client = nullptr;
+  MTA_lastActivity = 0;
 }
 
 
 void ModbusClientTCPasync::onACError(AsyncClient* c, int8_t error) {
   // onDisconnect will alse be called, so nothing to do here
   LOG_W("TCP error: %s\n", c->errorToString(error));
-  disconnect();
-
+  //disconnect();
 }
 
-/*
-void onTimeout(uint32_t time) {
-  // timeOut is handled by onPoll or onDisconnect
+void ModbusClientTCPasync::onAck(size_t len, uint32_t time) {
+  LOCK_GUARD(lock1, qLock);
+  handleSendingQueue();
 }
 
-void onAck(size_t len, uint32_t time) {
-  // assuming we don't need this
-}
-*/
 void ModbusClientTCPasync::onPacket(uint8_t* data, size_t length) {
   LOG_D("packet received (len:%d)\n", length);
   // reset idle timeout
@@ -341,7 +354,7 @@ void ModbusClientTCPasync::onPacket(uint8_t* data, size_t length) {
   handleSendingQueue();
 }
 
-void ModbusClientTCPasync::onPoll() {
+void ModbusClientTCPasync::onPoll(AsyncClient* client) {
   {
   LOCK_GUARD(lock1, qLock);
 
@@ -367,7 +380,7 @@ void ModbusClientTCPasync::onPoll() {
 
   // if nothing happened during idle timeout, gracefully close connection
   if (millis() - MTA_lastActivity > MTA_idleTimeout) {
-    disconnect();
+    client->close();
   }
 }
 
@@ -401,14 +414,20 @@ bool ModbusClientTCPasync::send(RequestEntry* re) {
     return false;
   }
 
+  if(!MTA_client->connected() || ! MTA_client->canSend()) {
+    LOG_E("can't send  (msgid:%d)\n", re->head.transactionID);
+    return 0;
+  }
+
+
   // check if TCP client is able to send
-  if (MTA_client.space() > ((uint32_t)re->msg.size() + 6)) {
+  if (MTA_client->space() > ((uint32_t)re->msg.size() + 6)) {
     // Write TCP header first
-    MTA_client.add(reinterpret_cast<const char *>((const uint8_t *)(re->head)), 6, ASYNC_WRITE_FLAG_COPY);
+    MTA_client->add(reinterpret_cast<const char *>((const uint8_t *)(re->head)), 6, ASYNC_WRITE_FLAG_COPY);
     // Request comes next
-    MTA_client.add(reinterpret_cast<const char*>(re->msg.data()), re->msg.size(), ASYNC_WRITE_FLAG_COPY);
+    MTA_client->add(reinterpret_cast<const char*>(re->msg.data()), re->msg.size(), ASYNC_WRITE_FLAG_COPY);
     // done
-    MTA_client.send();
+    MTA_client->send();
     LOG_D("request sent (msgid:%d)\n", re->head.transactionID);
     return true;
   }

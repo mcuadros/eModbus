@@ -124,13 +124,12 @@ protected:
   void isInstance() { return; }     // make class instantiable
 
   // TCP handling code, all static taking a class instancs as param
-  void onConnected();
+  void onConnected(AsyncClient* c);
   void onDisconnected();
   void onACError(AsyncClient* c, int8_t error);
-  // void onTimeout(uint32_t time);
-  // void onAck(size_t len, uint32_t time);
   void onPacket(uint8_t* data, size_t length);
-  void onPoll();
+  void onPoll(AsyncClient *c);
+  void onAck(size_t len, uint32_t time);
   void handleSendingQueue();
 
   std::list<RequestEntry*> txQueue;           // Queue to hold requests to be sent
@@ -140,7 +139,7 @@ protected:
   std::mutex qLock;                         // Mutex to protect queues
   #endif
 
-  AsyncClient MTA_client;           // Async TCP client
+  AsyncClient *MTA_client;           // Async TCP client
   uint32_t MTA_timeout;             // Standard timeout value taken
   uint32_t MTA_idleTimeout;         // Standard timeout value taken
   uint16_t MTA_qLimit;              // Maximum number of requests to accept in queue
@@ -157,8 +156,9 @@ protected:
   ClientState MTA_state;                      // TCP connection state
   IPAddress MTA_host;
   uint16_t MTA_port;
-  
+public:
   ClientState state();
+  
 };
 
 
