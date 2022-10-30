@@ -130,7 +130,8 @@ protected:
   void _onPoll();
 
   // Number of requests generated. Used for transactionID in TCPhead
-  uint32_t _transactionID;
+  uint32_t _transactionID = 0;
+  std::mutex _sendLock;
   bool _send();
 };
 

@@ -65,7 +65,7 @@ ModbusMessage ModbusClientTCPAsyncOne::syncRequestM(ModbusMessage msg, uint32_t 
     delay(10);
   }
 
-
+  _isRequestReady = false;
   _isResponseReady = false;
   return _response;
 }
@@ -86,12 +86,14 @@ void ModbusClientTCPAsyncOne::connect() {
       disconnect(true);
       return;
     }
+
+    delay(10);
   }
 }
 
 // manually disconnect from modbus server. Connection will also auto close after idle time
  void ModbusClientTCPAsyncOne::disconnect(bool force) {
-  //LOG_D("disconnecting\n");
+  LOG_D("disconnecting\n");
 
  // _isResponseReady = false;
   MTA_client.close(force);
@@ -130,47 +132,48 @@ void ModbusClientTCPAsyncOne::_onConnect() {
 }
 
 void ModbusClientTCPAsyncOne::_onDisconnect() {
-//  LOG_I("disconnected\n");
+  LOG_D("disconnected\n");
 
   ModbusMessage response;
   response.setError(0, 0, IP_CONNECTION_FAILED);
 
   if (_isResponseReady) LOG_E("was already ready\n") ;
 
+  _isRequestReady = false;
   _isResponseReady = true;
   _response = response;
 }
 
 void ModbusClientTCPAsyncOne::_onAck(size_t len, uint32_t time) {
   MTA_lastActivity = millis();
-  _send();
 }
 
 void ModbusClientTCPAsyncOne::_onPoll() {
-  Serial.println("onpoll");
-  _send();
-  
   if (millis() - MTA_lastActivity > MTA_idleTimeout) {
+    Serial.println("_onPoll: disconnect");
     disconnect();
   }
 }
 
 
 bool ModbusClientTCPAsyncOne::_send() {
+  MTA_lastActivity = millis();
+
   if (!_isRequestReady) {
     return false;
   }
 
+  if(!MTA_client.connected() || !MTA_client.canSend()) {
+    LOG_E("can't send\n");
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lck(_sendLock);
+  
   // Write TCP header first
   ModbusTCPhead head;
   head.transactionID = _transactionID++;
   head.len = _request.size();
-
-
-  if(!MTA_client.connected() || !MTA_client.canSend()) {
-    LOG_E("can't send  (msgid:%d)\n", head.transactionID);
-    return false;
-  }
 
   // check if TCP client is able to send
   if (MTA_client.space() < ((uint32_t)_request.size() + 6)) {
@@ -194,10 +197,11 @@ bool ModbusClientTCPAsyncOne::_send() {
 void ModbusClientTCPAsyncOne::_onError(AsyncClient* c, int8_t error) {
   // onDisconnect will alse be called, so nothing to do here
   LOG_W("TCP error: %s\n", c->errorToString(error));
+  disconnect(true);
 }
 
 void ModbusClientTCPAsyncOne::_onData(uint8_t* data, size_t length) {
-  LOG_D("packet received (len:%d)\n", length);
+  LOG_D("packet received (len:%d), state=%d\n", length, _state());
   // reset idle timeout
   MTA_lastActivity = millis();
 
@@ -206,11 +210,9 @@ void ModbusClientTCPAsyncOne::_onData(uint8_t* data, size_t length) {
   }
 
   while (length > 0) {
-    ModbusMessage* response = nullptr;
     uint16_t transactionID = 0;
     uint16_t protocolID = 0;
     uint16_t messageLength = 0;
-    bool isOkay = false;
 
     // MBAP header is 6 bytes, we can't do anything with less
     // total message should fit MBAP plus remaining bytes (in data[4], data[5])
@@ -218,32 +220,18 @@ void ModbusClientTCPAsyncOne::_onData(uint8_t* data, size_t length) {
       transactionID = (data[0] << 8) | data[1];
       protocolID = (data[2] << 8) | data[3];
       messageLength = (data[4] << 8) | data[5];
-      if (protocolID == 0 &&
-        length >= (uint32_t)messageLength + 6 &&
-        messageLength < 256) {
-        response = new ModbusMessage(messageLength);
-        response->add(&data[6], messageLength);
+      if (protocolID == 0 && length >= (uint32_t)messageLength + 6 && messageLength < 256) {
+        _response.resize(messageLength);
+        _response.clear();
+        _response.add(&data[6], messageLength);
         LOG_D("packet validated (len:%d)\n", messageLength);
 
         // on next iteration: adjust remaining length and pointer to data
         length -= 6 + messageLength;
         data += 6 + messageLength;
-        isOkay = true;
-
-          Serial.println(response->getError());
-
+        _isResponseReady = true;
       }
     }
-
-    if (!isOkay) {
-      LOG_W("packet invalid\n");
-      return;
-    }
-
-    _isResponseReady = true;
-    _response = *response;
-
-    delete response;
   }
   
   _send();
